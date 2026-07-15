@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   test-and-package:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.0
           cache: npm
 
       - name: Install dependencies
@@ -39,4 +39,3 @@ jobs:
           name: Whisper-App-${{ github.ref_name }}-windows-x64
           path: dist/Whisper-Setup-1.7.1-audio-devices.exe
           if-no-files-found: error
-

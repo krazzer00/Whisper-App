@@ -110,7 +110,7 @@ Expected: exit 0.
 
 - [ ] **Step 1: Create the workflow**
 
-Use `windows-latest`, `actions/checkout@v4`, `actions/setup-node@v4` with Node 22 and npm cache, `npm ci`, `npm test`, `npm run dist:win`, and `actions/upload-artifact@v4` for `dist/Whisper-Setup-1.7.1-audio-devices.exe`. Set top-level `permissions: contents: read` and a 30-minute timeout.
+Use `windows-2022`, `actions/checkout@v4`, `actions/setup-node@v4` with Node `22.22.0` and npm cache, `npm ci`, `npm test`, `npm run dist:win`, and `actions/upload-artifact@v4` for `dist/Whisper-Setup-1.7.1-audio-devices.exe`. Set top-level `permissions: contents: read` and a 30-minute timeout.
 
 - [ ] **Step 2: Validate workflow and paths**
 

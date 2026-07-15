@@ -33,3 +33,10 @@ test('renderer and native build entry points exist', () => {
         assert.ok(fs.existsSync(path.join(root, relativePath)), `${relativePath} is missing`);
     }
 });
+
+test('Windows CI pins the Node and MSVC-compatible runner matrix', () => {
+    const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'windows-build.yml'), 'utf8');
+
+    assert.match(workflow, /runs-on:\s*windows-2022/);
+    assert.match(workflow, /node-version:\s*22\.22\.0/);
+});

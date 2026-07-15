@@ -53,7 +53,7 @@ The Russian README contains:
 
 ## CI and release workflow
 
-GitHub Actions runs on `windows-latest`, uses a pinned Node major version, installs with `npm ci`, runs the complete test suite, builds the renderer and native helper, and builds the NSIS installer. Workflow permissions remain read-only except where an explicitly tag-triggered release job needs `contents: write`. The initial `v1.7.1` release is created from the locally verified artifact using authenticated GitHub CLI.
+GitHub Actions runs on `windows-2022` with Node `22.22.0`, matching the MSVC 2022/native dependency matrix verified locally. It installs with `npm ci`, runs the complete test suite, builds the renderer and native helper, and builds the NSIS installer. Workflow permissions remain read-only. The initial `v1.7.1` release is created from the locally verified artifact using authenticated GitHub CLI.
 
 ## Validation and security gates
 
