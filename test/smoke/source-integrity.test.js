@@ -13,6 +13,7 @@ test('reconstructed project exposes deterministic build and package scripts', ()
     assert.ok(pkg.scripts['build:renderer']);
     assert.ok(pkg.scripts['build:native']);
     assert.ok(pkg.scripts['dist:win']);
+    assert.match(pkg.scripts['dist:win'], /--publish never/);
     assert.equal(pkg.build.win.target[0].target, 'nsis');
     assert.deepEqual(pkg.build.win.target[0].arch, ['x64']);
     assert.ok(pkg.build.extraResources.some(item => item.to === 'native/windows-audio-helper'));

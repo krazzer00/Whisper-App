@@ -22,3 +22,4 @@
 
 Режим `chromium-default` существует только как явно выбранный аварийный fallback. Он не включается автоматически вместо сохранённого WASAPI endpoint.
 
+Release‑сборка использует `electron-builder --publish never`: updater metadata включается в пакет, но публикация GitHub Release выполняется отдельным проверяемым шагом.

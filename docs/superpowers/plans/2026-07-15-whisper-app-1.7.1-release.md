@@ -181,7 +181,7 @@ Expected: clean working tree except ignored build output.
 - [ ] **Step 1: Build installer**
 
 Run: `npm run dist:win`
-Expected: electron-builder creates the exact 1.7.1 installer and blockmap.
+Expected: electron-builder creates the exact 1.7.1 installer and blockmap with `--publish never`, preventing implicit CI publication.
 
 - [ ] **Step 2: Verify packaged resources**
 
