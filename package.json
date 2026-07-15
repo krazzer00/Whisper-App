@@ -1,0 +1,106 @@
+{
+  "name": "whisper",
+  "productName": "Whisper",
+  "version": "1.7.1",
+  "description": "Whisper AI Assistant",
+  "main": "src/index.js",
+  "author": {
+    "name": "Whisper Team",
+    "email": "support@whisper.app"
+  },
+  "license": "GPL-3.0",
+  "scripts": {
+    "pretest": "npm run build:native",
+    "test": "node --test test/**/*.test.js",
+    "build:renderer": "node scripts/build-renderer.js",
+    "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
+    "build": "npm run build:renderer && npm run build:native",
+    "pack:win": "npm run build && electron-builder --win --x64 --dir",
+    "dist:win": "npm run build && electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "@google/genai": "^1.8.0",
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.10.0",
+    "better-sqlite3": "^9.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "electron-squirrel-startup": "^1.0.1",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.6.2",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^2.7.0",
+    "react-hot-toast": "^2.5.2",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "sharp": "^0.34.2",
+    "validator": "^13.11.0",
+    "wait-on": "^8.0.3",
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "dmg-license": "^1.0.11",
+    "electron-liquid-glass": "^1.0.1"
+  },
+  "devDependencies": {
+    "electron": "30.5.1",
+    "electron-builder": "24.13.3",
+    "esbuild": "0.23.1",
+    "playwright-core": "1.54.1"
+  },
+  "build": {
+    "appId": "com.whisper.desktop",
+    "productName": "Whisper",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "public/**/*",
+      "whisper_web/backend_node/dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*",
+      "**/node_modules/sharp/**/*",
+      "src/ui/assets/SystemAudioDump"
+    ],
+    "extraResources": [
+      {
+        "from": "native/windows-audio-helper/bin",
+        "to": "native/windows-audio-helper",
+        "filter": [
+          "whisper-audio-helper.exe"
+        ]
+      },
+      {
+        "from": "whisper_web/out",
+        "to": "out"
+      },
+      {
+        "from": "build/app-update.yml",
+        "to": "app-update.yml"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/ui/assets/logo.ico",
+      "artifactName": "Whisper-Setup-${version}-audio-devices.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

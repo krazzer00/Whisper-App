@@ -1,0 +1,791 @@
+import { html, LitElement } from '../assets/lit-core-2.7.4.min.js';
+import { settingsViewStyles } from './settings-view.css.js';
+
+export class SettingsView extends LitElement {
+    static styles = settingsViewStyles;
+
+    //////// after_modelStateService ////////
+    static properties = {
+        shortcuts: { type: Object, state: true },
+        user: { type: Object },
+        isLoading: { type: Boolean, state: true },
+        isContentProtectionOn: { type: Boolean, state: true },
+        autoUpdateEnabled: { type: Boolean, state: true },
+        autoUpdateLoading: { type: Boolean, state: true },
+        displays: { type: Array, state: true },
+        currentDisplayId: { type: Number, state: true },
+        showMonitors: { type: Boolean, state: true },
+        isLoggingOut: { type: Boolean, state: true },
+        appVersion: { type: String, state: true },
+        updateAvailable: { type: Boolean, state: true },
+        updateVersion: { type: String, state: true },
+        releaseUrl: { type: String, state: true },
+        isWindows: { type: Boolean, state: true },
+        isDownloading: { type: Boolean, state: true },
+        updateReady: { type: Boolean, state: true },
+        settings: { type: Object, state: true },
+        microphones: { type: Array, state: true },
+        outputDevices: { type: Array, state: true },
+        audioDevicesLoading: { type: Boolean, state: true },
+        audioHealth: { type: Object, state: true },
+        audioRms: { type: Object, state: true },
+    };
+    //////// after_modelStateService ////////
+
+    constructor() {
+        super();
+        this.shortcuts = {};
+        this.user = null;
+        this.isLoading = true;
+        this.isContentProtectionOn = true;
+        this.handleLogin = this.handleLogin.bind(this);
+        this.autoUpdateEnabled = true;
+        this.autoUpdateLoading = true;
+        this.displays = [];
+        this.currentDisplayId = null;
+        this.showMonitors = true;
+        this.isLoggingOut = false;
+        this.updateAvailable = false;
+        this.updateVersion = null;
+        this.releaseUrl = null;
+        this.isWindows = window.api?.platform?.isWindows || false;
+        this.isDownloading = false;
+        this.updateReady = false;
+        this.settings = { microphoneDeviceId: 'default', systemAudioDeviceId: null, systemAudioMode: 'wasapi' };
+        this.microphones = [];
+        this.outputDevices = [];
+        this.audioDevicesLoading = false;
+        this.audioHealth = { state: 'idle' };
+        this.audioRms = { microphone: 0, system: 0 };
+        this._micMeter = null;
+        this.loadInitialData();
+    }
+
+    async loadAutoUpdateSetting() {
+        if (!window.api) return;
+        this.autoUpdateLoading = true;
+        try {
+            const enabled = await window.api.settingsView.getAutoUpdate();
+            this.autoUpdateEnabled = enabled;
+            console.log('Auto-update setting loaded:', enabled);
+        } catch (e) {
+            console.error('Error loading auto-update setting:', e);
+            this.autoUpdateEnabled = true; // fallback
+        }
+        this.autoUpdateLoading = false;
+        this.requestUpdate();
+    }
+
+    async loadAppVersion() {
+        if (!window.api) return;
+        try {
+            const version = await window.api.settingsView.getAppVersion();
+            this.appVersion = version;
+        } catch (e) {
+            console.error('Error loading app version:', e);
+            this.appVersion = 'Unknown';
+        }
+        this.requestUpdate();
+    }
+
+    async checkForUpdates() {
+        if (!window.api || !window.api.settingsView) return;
+        try {
+            await window.api.settingsView.checkForUpdates();
+        } catch (e) {
+            console.error('Error checking for updates:', e);
+        }
+    }
+
+    async handleToggleAutoUpdate() {
+        if (!window.api || this.autoUpdateLoading) return;
+        this.autoUpdateLoading = true;
+        this.requestUpdate();
+        try {
+            const newValue = !this.autoUpdateEnabled;
+            const result = await window.api.settingsView.setAutoUpdate(newValue);
+            if (result && result.success) {
+                this.autoUpdateEnabled = newValue;
+            } else {
+                console.error('Failed to update auto-update setting');
+            }
+        } catch (e) {
+            console.error('Error toggling auto-update:', e);
+        }
+        this.autoUpdateLoading = false;
+        this.requestUpdate();
+    }
+
+    //////// after_modelStateService ////////
+    async loadInitialData() {
+        if (!window.api) return;
+        this.isLoading = true;
+        try {
+            // Load essential data only for current UI
+            const [userState, contentProtection, shortcuts, settings] = await Promise.all([
+                window.api.settingsView.getCurrentUser(),
+                window.api.settingsView.getContentProtectionStatus(),
+                window.api.settingsView.getCurrentShortcuts(),
+                window.api.settingsView.getSettings(),
+            ]);
+
+            if (userState && userState.isLoggedIn) this.user = userState;
+
+            this.isContentProtectionOn = contentProtection;
+            this.shortcuts = shortcuts || {};
+            this.settings = settings || this.settings;
+            await this.loadDisplays();
+            await this.refreshAudioDevices();
+        } catch (error) {
+            console.error('Error loading initial settings data:', error);
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    handleLogin(e) {
+        e.preventDefault();
+        if (this.wasJustDragged) return;
+
+        console.log('Requesting Firebase authentication from main process...');
+        window.api.settingsView.startWebappAuth();
+    }
+    //////// after_modelStateService ////////
+
+    openShortcutEditor() {
+        window.api.settingsView.openShortcutSettingsWindow();
+    }
+
+    connectedCallback() {
+        super.connectedCallback();
+
+        this.setupEventListeners();
+        this.setupIpcListeners();
+        // Setup update listeners FIRST so they're ready before any checks
+        this.setupUpdateListeners();
+        this.setupWindowResize();
+        this.loadAutoUpdateSetting();
+        this.loadAppVersion();
+        this.loadDisplays();
+        this.refreshAudioDevices();
+        // Delay check slightly to ensure listeners are fully registered
+        setTimeout(() => this.checkForUpdates(), 100);
+        // Force one height calculation immediately (innerHeight may be 0 at first)
+        setTimeout(() => this.updateScrollHeight(), 0);
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this.cleanupEventListeners();
+        this.cleanupIpcListeners();
+        this.cleanupUpdateListeners();
+        this.cleanupWindowResize();
+        this.stopMicrophoneMeter();
+    }
+
+    setupEventListeners() {
+        this.addEventListener('mouseenter', this.handleMouseEnter);
+        this.addEventListener('mouseleave', this.handleMouseLeave);
+    }
+
+    cleanupEventListeners() {
+        this.removeEventListener('mouseenter', this.handleMouseEnter);
+        this.removeEventListener('mouseleave', this.handleMouseLeave);
+    }
+
+    setupIpcListeners() {
+        if (!window.api) return;
+
+        this._userStateListener = (event, userState) => {
+            console.log('[SettingsView] Received user-state-changed:', userState);
+            if (userState && userState.isLoggedIn) {
+                this.user = userState.currentUser || userState;
+            } else {
+                this.user = null;
+            }
+            this.isLoggingOut = false; // Reset logout state
+            this.loadAutoUpdateSetting();
+            // Reload basic settings when user state changes
+            this.loadInitialData();
+        };
+
+        this._settingsUpdatedListener = (event, settings) => {
+            console.log('[SettingsView] Received settings-updated');
+            this.settings = settings;
+            this.requestUpdate();
+        };
+
+        window.api.settingsView.onUserStateChanged(this._userStateListener);
+        window.api.settingsView.onSettingsUpdated(this._settingsUpdatedListener);
+        this._audioHealthListener = window.api.settingsView.onAudioHealth(health => {
+            this.audioHealth = health;
+            this.audioRms = { ...this.audioRms, system: health.rms || 0 };
+        });
+    }
+
+    cleanupIpcListeners() {
+        if (!window.api) return;
+
+        if (this._userStateListener) {
+            window.api.settingsView.removeOnUserStateChanged(this._userStateListener);
+        }
+        if (this._settingsUpdatedListener) {
+            window.api.settingsView.removeOnSettingsUpdated(this._settingsUpdatedListener);
+        }
+        if (this._audioHealthListener) window.api.settingsView.removeOnAudioHealth(this._audioHealthListener);
+    }
+
+    async refreshAudioDevices() {
+        if (!window.api?.settingsView) return;
+        this.audioDevicesLoading = true;
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            this.microphones = devices
+                .filter(device => device.kind === 'audioinput')
+                .map((device, index) => ({ id: device.deviceId, name: device.label || `Microphone ${index + 1}` }));
+            this.outputDevices = this.isWindows ? await window.api.settingsView.listOutputDevices() : [];
+            await this.startMicrophoneMeter();
+        } catch (error) {
+            this.audioHealth = { state: 'degraded', error: { code: 'DEVICE_ENUMERATION_FAILED', message: error.message } };
+        } finally {
+            this.audioDevicesLoading = false;
+        }
+    }
+
+    async saveAudioSetting(key, value) {
+        return this.saveAudioSettings({ [key]: value || null });
+    }
+
+    async saveAudioSettings(patch) {
+        const next = { ...this.settings, ...patch };
+        if (patch.systemAudioMode === 'chromium-default') next.systemAudioDeviceId = null;
+        const result = await window.api.settingsView.saveSettings(next);
+        if (result?.success) {
+            this.settings = next;
+            if (Object.hasOwn(patch, 'microphoneDeviceId')) await this.startMicrophoneMeter();
+        }
+    }
+
+    async startMicrophoneMeter() {
+        this.stopMicrophoneMeter();
+        const selected = this.settings.microphoneDeviceId;
+        const audio = selected && selected !== 'default' ? { deviceId: { exact: selected } } : true;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+            const context = new AudioContext();
+            const analyser = context.createAnalyser();
+            analyser.fftSize = 512;
+            context.createMediaStreamSource(stream).connect(analyser);
+            const samples = new Float32Array(analyser.fftSize);
+            const timer = setInterval(() => {
+                analyser.getFloatTimeDomainData(samples);
+                const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
+                this.audioRms = { ...this.audioRms, microphone: rms };
+            }, 150);
+            const stopTimer = setTimeout(() => this.stopMicrophoneMeter(), 5000);
+            this._micMeter = { stream, context, timer, stopTimer };
+        } catch (error) {
+            this.audioRms = { ...this.audioRms, microphone: 0 };
+            this.audioHealth = { state: 'degraded', error: { code: 'MICROPHONE_OPEN_FAILED', message: error.message } };
+        }
+    }
+
+    stopMicrophoneMeter() {
+        if (!this._micMeter) return;
+        clearInterval(this._micMeter.timer);
+        clearTimeout(this._micMeter.stopTimer);
+        this._micMeter.stream.getTracks().forEach(track => track.stop());
+        this._micMeter.context.close();
+        this._micMeter = null;
+    }
+
+    renderAudioDeviceOptions(devices, selectedId, disconnectedLabel) {
+        const selectedAvailable = !selectedId || selectedId === 'default' || devices.some(device => device.id === selectedId);
+        return html`
+            ${!selectedAvailable ? html`<option value=${selectedId} selected>${disconnectedLabel} — Disconnected</option>` : ''}
+            ${devices.map(device => html`<option value=${device.id} ?selected=${device.id === selectedId}>${device.name}</option>`)}
+        `;
+    }
+
+    setupUpdateListeners() {
+        if (!window.api || !window.api.settingsView) {
+            console.warn('[SettingsView] API not available for update listeners');
+            return;
+        }
+
+        this._updateAvailableListener = data => {
+            console.log('[SettingsView] Update available:', data);
+            this.updateAvailable = true;
+            this.isDownloading = true;
+            this.updateReady = false;
+            this.updateVersion = data.version || data.releaseName || 'latest';
+            this.releaseUrl = data.releaseUrl || 'https://github.com/ThanosKa/whisper-desktop/releases/latest';
+            this.requestUpdate();
+        };
+
+        this._updateDownloadedListener = data => {
+            console.log('[SettingsView] Update downloaded:', data);
+            this.updateAvailable = true;
+            this.isDownloading = false;
+            this.updateReady = true;
+            this.updateVersion = data.version || data.releaseName || 'latest';
+            this.releaseUrl = data.releaseUrl || 'https://github.com/ThanosKa/whisper-desktop/releases/latest';
+            this.requestUpdate();
+        };
+
+        this._updateNotAvailableListener = data => {
+            console.log('[SettingsView] Update not available:', data);
+            this.updateAvailable = false;
+            this.isDownloading = false;
+            this.updateReady = false;
+            this.requestUpdate();
+        };
+
+        this._updateErrorListener = data => {
+            console.error('[SettingsView] Update error:', data);
+            // On Windows, errors are common due to unsigned builds, so we still show manual download option
+            if (this.isWindows) {
+                this.updateAvailable = true; // Show manual download button
+                this.releaseUrl = 'https://github.com/ThanosKa/whisper-desktop/releases/latest';
+            }
+            this.requestUpdate();
+        };
+
+        try {
+            window.api.settingsView.onUpdateAvailable(this._updateAvailableListener);
+            window.api.settingsView.onUpdateDownloaded(this._updateDownloadedListener);
+            // Note: preload.js needs to expose these new listeners
+            if (window.api.settingsView.onUpdateNotAvailable) {
+                window.api.settingsView.onUpdateNotAvailable(this._updateNotAvailableListener);
+            }
+            if (window.api.settingsView.onUpdateError) {
+                window.api.settingsView.onUpdateError(this._updateErrorListener);
+            }
+            console.log('[SettingsView] Update listeners registered successfully');
+        } catch (err) {
+            console.error('[SettingsView] Failed to register update listeners:', err);
+        }
+    }
+
+    cleanupUpdateListeners() {
+        if (!window.api || !window.api.settingsView) return;
+        window.api.settingsView.removeUpdateListeners();
+    }
+
+    async handleUpdateAndRestart() {
+        if (!window.api || !window.api.settingsView) return;
+        try {
+            await window.api.settingsView.installUpdate();
+            // App will restart automatically
+        } catch (error) {
+            console.error('Error installing update:', error);
+            alert('Failed to install update. Please try again.');
+        }
+    }
+
+    async handleDownloadUpdate() {
+        if (!this.releaseUrl) return;
+        try {
+            if (window.api && window.api.common && window.api.common.openExternal) {
+                await window.api.common.openExternal(this.releaseUrl);
+            } else {
+                console.error('openExternal API not available');
+                alert('Please visit: ' + this.releaseUrl);
+            }
+        } catch (error) {
+            console.error('Error opening release URL:', error);
+            alert('Failed to open download page. Please visit: ' + this.releaseUrl);
+        }
+    }
+
+    setupWindowResize() {
+        this.resizeHandler = () => {
+            this.requestUpdate();
+            this.updateScrollHeight();
+        };
+        window.addEventListener('resize', this.resizeHandler);
+
+        // Initial setup
+        setTimeout(() => this.updateScrollHeight(), 100);
+    }
+
+    cleanupWindowResize() {
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+        }
+    }
+
+    updateScrollHeight() {
+        // Bug protection where window.innerHeight is reported as 0 at some point in Electron
+        const rawHeight = window.innerHeight || (window.screen ? window.screen.height : 0);
+        const MIN_HEIGHT = 300; // minimum guaranteed height
+        const maxHeight = Math.max(MIN_HEIGHT, rawHeight);
+
+        this.style.maxHeight = `${maxHeight}px`;
+
+        const container = this.shadowRoot?.querySelector('.settings-container');
+        if (container) {
+            container.style.maxHeight = `${maxHeight}px`;
+        }
+    }
+
+    handleMouseEnter = () => {
+        window.api.settingsView.cancelHideSettingsWindow();
+        // Recalculate height in case it was set to 0 before
+        this.updateScrollHeight();
+        this.loadDisplays();
+    };
+
+    handleMouseLeave = () => {
+        this.stopMicrophoneMeter();
+        window.api.settingsView.hideSettingsWindow();
+    };
+
+    getMainShortcuts() {
+        return [
+            { name: 'Show / Hide', accelerator: this.shortcuts.toggleVisibility },
+            { name: 'Ask Anything', accelerator: this.shortcuts.nextStep },
+        ];
+    }
+
+    renderShortcutKeys(accelerator) {
+        if (!accelerator) return html`N/A`;
+
+        const isMac = navigator.userAgent.includes('Mac');
+        const processedAccelerator = accelerator.replace('CommandOrControl', isMac ? 'Cmd' : 'Ctrl');
+
+        const keyMap = {
+            Cmd: '⌘',
+            Command: '⌘',
+            Ctrl: 'Ctrl',
+            Alt: '⌥',
+            Shift: '⇧',
+            Enter: '↵',
+            Up: '↑',
+            Down: '↓',
+            Left: '←',
+            Right: '→',
+        };
+
+        // special handling for scrollDown/scrollUp
+        if (processedAccelerator.includes('↕')) {
+            const keys = processedAccelerator.replace('↕', '').split('+');
+            keys.push('↕');
+            return html`${keys.map(key => html`<span class="shortcut-key">${keyMap[key] || key}</span>`)}`;
+        }
+
+        const keys = processedAccelerator.split('+');
+        return html`${keys.map(key => html`<span class="shortcut-key">${keyMap[key] || key}</span>`)}`;
+    }
+
+    async loadDisplays() {
+        try {
+            if (!window.api) return;
+            const result = await window.api.settingsView.getDisplays();
+            if (result && Array.isArray(result.displays)) {
+                this.displays = result.displays;
+                this.currentDisplayId = result.currentDisplayId;
+                this.requestUpdate();
+            }
+        } catch (e) {
+            console.error('[SettingsView] Failed to load displays:', e);
+        }
+    }
+
+    async handleSelectDisplay(display) {
+        try {
+            if (!window.api) return;
+            const res = await window.api.settingsView.moveToDisplay(display.id);
+            if (res && res.success) {
+                this.currentDisplayId = display.id;
+                this.requestUpdate();
+            }
+        } catch (e) {
+            console.error('[SettingsView] Failed to move to display:', e);
+        }
+    }
+
+    handleMoveLeft() {
+        console.log('Move Left clicked');
+        window.api.settingsView.moveWindowStep('left');
+    }
+
+    handleMoveRight() {
+        console.log('Move Right clicked');
+        window.api.settingsView.moveWindowStep('right');
+    }
+
+    async handlePersonalize() {
+        console.log('Personalize clicked');
+        try {
+            await window.api.settingsView.openPersonalizePage();
+        } catch (error) {
+            console.error('Failed to open personalize page:', error);
+        }
+    }
+
+    async handleToggleInvisibility() {
+        console.log('Toggle Invisibility clicked');
+        this.isContentProtectionOn = await window.api.settingsView.toggleContentProtection();
+        this.requestUpdate();
+    }
+
+    handleQuit() {
+        console.log('Quit clicked');
+        window.api.settingsView.quitApplication();
+    }
+
+    async handleLogout() {
+        console.log('Logout clicked');
+        this.isLoggingOut = true;
+        this.requestUpdate();
+        try {
+            const result = await window.api.settingsView.signOut();
+            if (result && result.success) {
+                console.log('Logout successful');
+            } else {
+                console.error('Logout failed');
+            }
+        } catch (error) {
+            console.error('Error during logout:', error);
+        }
+        this.isLoggingOut = false;
+        this.requestUpdate();
+    }
+
+    handleViewOnboarding = async () => {
+        try {
+            console.log('[SettingsView] View Onboarding clicked');
+            await window.api.settingsView.showPermissionOnboarding();
+        } catch (e) {
+            console.error('[SettingsView] Failed to show onboarding:', e);
+        }
+    };
+
+    handleOpenDbPath() {
+        console.log('Open DB Path clicked');
+        if (window.api && window.api.settingsView && window.api.settingsView.openDbPath) {
+            window.api.settingsView.openDbPath();
+        } else {
+            console.error('IPC handler for openDbPath not available');
+        }
+    }
+
+    render() {
+        if (this.isLoading) {
+            return html`
+                <div class="settings-container">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading...</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        return html`
+            <div class="settings-container">
+                <div class="header-section">
+                    <div>
+                        <h1 class="app-title">Whisper</h1>
+                        <div class="account-info">
+                            ${this.user ? html`Account: ${this.user.currentUser?.email || this.user.email || 'Logged In'}` : `Account: Not Logged In`}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="toggle-container stealth-toggle ${this.isContentProtectionOn ? 'on' : 'off'}">
+                    <div
+                        class="invisibility-icon ${this.isContentProtectionOn ? 'visible' : ''}"
+                        style="opacity: 1; padding-top: 0; margin-right: 8px;"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M9.785 7.41787C8.7 7.41787 7.79 8.19371 7.55667 9.22621C7.0025 8.98704 6.495 9.05121 6.11 9.22037C5.87083 8.18204 4.96083 7.41787 3.88167 7.41787C2.61583 7.41787 1.58333 8.46204 1.58333 9.75121C1.58333 11.0404 2.61583 12.0845 3.88167 12.0845C5.08333 12.0845 6.06333 11.1395 6.15667 9.93787C6.355 9.79787 6.87417 9.53537 7.51 9.94954C7.615 11.1454 8.58333 12.0845 9.785 12.0845C11.0508 12.0845 12.0833 11.0404 12.0833 9.75121C12.0833 8.46204 11.0508 7.41787 9.785 7.41787ZM3.88167 11.4195C2.97167 11.4195 2.2425 10.6729 2.2425 9.75121C2.2425 8.82954 2.9775 8.08287 3.88167 8.08287C4.79167 8.08287 5.52083 8.82954 5.52083 9.75121C5.52083 10.6729 4.79167 11.4195 3.88167 11.4195ZM9.785 11.4195C8.875 11.4195 8.14583 10.6729 8.14583 9.75121C8.14583 8.82954 8.875 8.08287 9.785 8.08287C10.695 8.08287 11.43 8.82954 11.43 9.75121C11.43 10.6729 10.6892 11.4195 9.785 11.4195ZM12.6667 5.95954H1V6.83454H12.6667V5.95954ZM8.8925 1.36871C8.76417 1.08287 8.4375 0.931207 8.12833 1.03037L6.83333 1.46204L5.5325 1.03037L5.50333 1.02454C5.19417 0.93704 4.8675 1.10037 4.75083 1.39787L3.33333 5.08454H10.3333L8.91 1.39787L8.8925 1.36871Z"
+                                fill="white"
+                            />
+                        </svg>
+                    </div>
+                    <span class="toggle-label" style="color: white;">Stealth Mode</span>
+                    <div class="toggle-switch ${this.isContentProtectionOn ? 'active' : ''}" @click=${this.handleToggleInvisibility}>
+                        <div class="toggle-knob"></div>
+                    </div>
+                </div>
+
+                <div class="shortcuts-section">
+                    ${this.getMainShortcuts().map(
+                        shortcut => html`
+                            <div class="shortcut-item">
+                                <span class="shortcut-name">${shortcut.name}</span>
+                                <div class="shortcut-keys">${this.renderShortcutKeys(shortcut.accelerator)}</div>
+                            </div>
+                        `
+                    )}
+                </div>
+
+                ${this.isWindows
+                    ? html`
+                          <section class="audio-devices-section">
+                              <div class="audio-section-header">
+                                  <div>
+                                      <div class="audio-section-title">Audio devices</div>
+                                      <div class="audio-section-status ${this.audioHealth.state}">
+                                          ${this.audioHealth.state === 'degraded'
+                                              ? this.audioHealth.error?.message || 'System audio is unavailable'
+                                              : this.audioHealth.state === 'capturing'
+                                                ? 'Selected devices are capturing'
+                                                : 'Choose independent input and output sources'}
+                                      </div>
+                                  </div>
+                                  <button class="audio-refresh-button" @click=${this.refreshAudioDevices} ?disabled=${this.audioDevicesLoading}>
+                                      ${this.audioDevicesLoading ? 'Refreshing…' : 'Refresh devices'}
+                                  </button>
+                              </div>
+
+                              <label class="audio-device-field">
+                                  <span>Microphone</span>
+                                  <select
+                                      .value=${this.settings.microphoneDeviceId || 'default'}
+                                      @change=${event => this.saveAudioSetting('microphoneDeviceId', event.target.value)}
+                                  >
+                                      <option value="default">Windows default microphone</option>
+                                      ${this.renderAudioDeviceOptions(this.microphones, this.settings.microphoneDeviceId, 'Saved microphone')}
+                                  </select>
+                                  <span class="rms-track"><span style="width:${Math.min(100, this.audioRms.microphone * 300)}%"></span></span>
+                              </label>
+
+                              <label class="audio-device-field">
+                                  <span>System audio</span>
+                                  <select
+                                      .value=${this.settings.systemAudioMode === 'chromium-default'
+                                          ? '__chromium_default__'
+                                          : this.settings.systemAudioDeviceId || ''}
+                                      @change=${event => {
+                                          const value = event.target.value;
+                                          if (value === '__chromium_default__') this.saveAudioSettings({ systemAudioMode: 'chromium-default', systemAudioDeviceId: null });
+                                          else this.saveAudioSettings({ systemAudioMode: 'wasapi', systemAudioDeviceId: value });
+                                      }}
+                                  >
+                                      <option value="" disabled>Select a Windows output endpoint</option>
+                                      ${this.renderAudioDeviceOptions(this.outputDevices, this.settings.systemAudioDeviceId, 'Saved output')}
+                                      <option value="__chromium_default__">Emergency — Windows default</option>
+                                  </select>
+                                  <span class="rms-track"><span style="width:${Math.min(100, this.audioRms.system * 300)}%"></span></span>
+                              </label>
+                          </section>
+                      `
+                    : ''}
+
+                ${this.displays && this.displays.length > 1
+                    ? html`
+                          <div class="preset-section">
+                              <div class="preset-header">
+                                  <span class="preset-title">Monitor display</span>
+                              </div>
+                              <div class="preset-list">
+                                  ${this.displays.map(
+                                      d => html`
+                                          <div
+                                              class="monitor-item ${this.currentDisplayId === d.id ? 'selected' : ''}"
+                                              @click=${() => this.handleSelectDisplay(d)}
+                                          >
+                                              <span class="monitor-name">${d.name}</span>
+                                              ${this.currentDisplayId === d.id ? html`<span class="monitor-status">Current</span>` : ''}
+                                          </div>
+                                      `
+                                  )}
+                              </div>
+                          </div>
+                      `
+                    : ''}
+
+                <div class="buttons-section">
+                    <button class="settings-button full-width" @click=${this.handlePersonalize}>
+                        <span>Personalize / Meeting Notes</span>
+                    </button>
+                    <!-- <div class="toggle-container auto-update-toggle ${this.autoUpdateEnabled ? 'on' : 'off'}">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="white"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="lucide lucide-download-icon lucide-download"
+                            style="margin-right: 8px;"
+                        >
+                            <path d="M12 15V3" />
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <path d="m7 10 5 5 5-5" />
+                        </svg>
+                        <span class="toggle-label" style="color: white;">Automatic Updates</span>
+                        <div class="toggle-switch ${this.autoUpdateEnabled ? 'active' : ''}" @click=${this.handleToggleAutoUpdate}>
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </div> -->
+
+                    <div class="move-buttons">
+                        <button class="settings-button half-width" @click=${this.handleMoveLeft}>
+                            <span>← Move</span>
+                        </button>
+                        <button class="settings-button half-width" @click=${this.handleMoveRight}>
+                            <span>Move →</span>
+                        </button>
+                    </div>
+
+                    <div class="move-buttons">
+                        ${this.user
+                            ? html`
+                                  <button class="settings-button half-width ${this.isLoggingOut ? 'logout-loading' : ''}" @click=${this.handleLogout}>
+                                      <span>Logout</span>
+                                      ${this.isLoggingOut
+                                          ? html`
+                                                <div class="thinking-dots thinking-slide">
+                                                    <div class="thinking-dot"></div>
+                                                    <div class="thinking-dot"></div>
+                                                    <div class="thinking-dot"></div>
+                                                </div>
+                                            `
+                                          : ''}
+                                  </button>
+                              `
+                            : html`
+                                  <button class="settings-button half-width" @click=${this.handleLogin}>
+                                      <span>Login</span>
+                                  </button>
+                              `}
+                        <button class="settings-button half-width" @click=${this.handleQuit}>
+                            <span>Quit</span>
+                        </button>
+                    </div>
+
+                    <div class="move-buttons">
+                        <button class="settings-button full-width" @click=${this.handleViewOnboarding}>
+                            <span>View Onboarding</span>
+                        </button>
+                    </div>
+
+                    <div class="move-buttons">
+                        <button class="settings-button full-width" @click=${this.handleOpenDbPath}>
+                            <span>Open Whisper Storage</span>
+                        </button>
+                    </div>
+
+                    ${this.updateReady
+                        ? html`
+                              <button class="settings-button full-width primary" @click=${this.handleUpdateAndRestart}>
+                                  <span>Update & Restart</span>
+                              </button>
+                          `
+                        : html` <div class="version-info">Version ${this.appVersion || 'Loading...'}</div> `}
+                </div>
+            </div>
+        `;
+    }
+    //////// after_modelStateService ////////
+}
+
+customElements.define('settings-view', SettingsView);

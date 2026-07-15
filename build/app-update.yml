@@ -1,0 +1,5 @@
+owner: ThanosKa
+repo: whisper-desktop
+provider: github
+releaseType: draft
+updaterCacheDirName: whisper-updater
