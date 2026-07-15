@@ -26,10 +26,13 @@ async function captureOneFrame(device) {
     }
 }
 
-test('two independently selected WASAPI endpoints produce framed PCM heartbeat while silent', { skip: process.platform !== 'win32', timeout: 16000 }, async () => {
+test('two independently selected WASAPI endpoints produce framed PCM heartbeat while silent', { skip: process.platform !== 'win32', timeout: 16000 }, async t => {
     const discovery = new WindowsAudioService({ healthTimeoutMs: 4000 });
     const devices = await discovery.listDevices();
-    assert.ok(devices.length >= 2, 'at least two active render endpoints are required for independent selection verification');
+    if (devices.length < 2) {
+        t.skip('hardware integration requires at least two active render endpoints');
+        return;
+    }
     const defaultDevice = devices.find(device => device.isDefault) || devices[0];
     const secondDevice = devices.find(device => device.id !== defaultDevice.id);
 

@@ -133,7 +133,7 @@ Expected: exit 0 with the lockfile unchanged.
 - [ ] **Step 2: Run full tests**
 
 Run: `npm test`
-Expected: `pretest` compiles the native helper, then all 18 tests pass, including two independently selected WASAPI endpoints.
+Expected: `pretest` compiles the native helper, then all tests pass. The two-endpoint hardware integration test runs when endpoints exist and is explicitly skipped on headless CI without audio hardware.
 
 - [ ] **Step 3: Build all outputs**
 
